@@ -1,5 +1,6 @@
 import os
 import csv
+import json
 import requests
 from pymongo import MongoClient
 
@@ -11,6 +12,7 @@ def upload_data():
     
     base_path = os.path.dirname(os.path.abspath(__file__))
     csv_file = os.path.join(base_path, "global_terrorism_data.csv")
+    json_file = os.path.join(base_path, "global_terrorism_data.json")
 
     print(f"Descargando CSV desde: {CSV_URL}...")
     try:
@@ -24,6 +26,21 @@ def upload_data():
         print(f"Error descargando el CSV: {e}")
         return
 
+    data = []
+    print(f"Transformando CSV a JSON...")
+    try:
+        with open(csv_file, encoding='latin-1') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                data.append(row)
+
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4)
+        print(f"Archivo JSON creado correctamente.")
+    except Exception as e:
+        print(f"Error en la transformacion: {e}")
+        return
+
     client = None
     try:
         client = MongoClient(MONGO_URI)
@@ -31,27 +48,9 @@ def upload_data():
         collection = db[COLLECTION_NAME]
         print(f"Conectado a MongoDB.")
 
-        print(f"Procesando y subiendo registros...")
-        
-        with open(csv_file, encoding='latin-1') as f:
-            reader = csv.DictReader(f)
-            batch = []
-            count = 0
-            
-            for row in reader:
-                batch.append(row)
-                count += 1
-                
-                if len(batch) >= 5000:
-                    collection.insert_many(batch)
-                    print(f"   - {count} registros subidos...")
-                    batch = []
-            
-            if batch:
-                collection.insert_many(batch)
-                print(f"   - {count} registros totales subidos.")
-            
-            print(f"Datos subidos correctamente.")
+        print(f"Subiendo datos desde el JSON...")
+        collection.insert_many(data)
+        print(f"Datos subidos correctamente.")
 
     except Exception as e:
         print(f"Error al subir a MongoDB: {e}")
@@ -62,4 +61,6 @@ def upload_data():
         
         if os.path.exists(csv_file):
              os.remove(csv_file)
-             print(f"Archivo temporal eliminado.")
+        if os.path.exists(json_file):
+             os.remove(json_file)
+        print(f"Archivos temporales eliminados.")
