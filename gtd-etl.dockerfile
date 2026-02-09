@@ -1,23 +1,15 @@
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 WORKDIR /gtd-etl
 
-RUN apk add --no-cache \
-    build-base \
-    libffi-dev \
-    openssl-dev \
-    git \
-    sed
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir /tmp/repo && \
-    cd /tmp/repo && \
-    git init && \
-    git remote add -f origin https://github.com/moonlightKiR/MD003-E4.git && \
-    git config core.sparseCheckout true && \
-    echo "gtd-etl/" >> .git/info/sparse-checkout && \
-    git pull origin main && \
-    mv gtd-etl/* /gtd-etl/ && \
-    cd /gtd-etl && \
-    rm -rf /tmp/repo
+COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["python", "main.py"]
