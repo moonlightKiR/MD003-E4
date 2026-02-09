@@ -48,10 +48,8 @@ def upload_data():
         client = MongoClient(MONGO_URI)
         db = client[DATABASE_NAME]
         collection = db[COLLECTION_NAME]
-        
         print(f"Borrando coleccion existente...")
         collection.drop()
-        
         print(f"Conectado a MongoDB.")
 
         print(f"Subiendo registros...")
@@ -68,7 +66,6 @@ def upload_data():
                     batch = []
             if batch:
                 collection.insert_many(batch)
-            
         print(f"Carga completada.")
 
     except Exception as e:
@@ -88,9 +85,6 @@ def get_collection():
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
     DATABASE_NAME = os.getenv("DATABASE_NAME", "gtd_database")
     COLLECTION_NAME = "incidents"
-    
     client = MongoClient(MONGO_URI)
     db = client[DATABASE_NAME]
-    collection = db[COLLECTION_NAME]
-    
-    return collection
+    return db[COLLECTION_NAME]

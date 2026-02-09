@@ -1,65 +1,81 @@
-import pandas as pd
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, when, count
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
 import mondongo
 import os
 
 def perform_eda():
+    # 1. Obtener la configuracion desde mondongo
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/")
+    DATABASE_NAME = os.getenv("DATABASE_NAME", "gtd_database")
+    COLLECTION_NAME = "incidents"
+    
+    print(f"Iniciando PySpark con conexion a MongoDB: {DATABASE_NAME}.{COLLECTION_NAME}")
+    
+    # 2. Iniciar Spark con el conector de MongoDB
+    # Usamos la version 10.x que es la mas moderna para Spark 3.x
+    spark = SparkSession.builder \
+        .appName("GTD_EDA_Mongo") \
+        .config("spark.mongodb.read.connection.uri", MONGO_URI) \
+        .config("spark.mongodb.read.database", DATABASE_NAME) \
+        .config("spark.mongodb.read.collection", COLLECTION_NAME) \
+        .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.12:10.1.1") \
+        .config("spark.driver.memory", "2g") \
+        .getOrCreate()
 
     try:
+        # 3. Cargar datos desde MongoDB directamente a Spark
+        print("Cargando datos desde MongoDB...")
+        df = spark.read.format("mongodb").load()
         
-        # 1. Conexión y carga de datos
-        collection = mondongo.get_collection()
-        
-        print("Cargando datos desde MongoDB para análisis EDA...")
-        data = list(collection.find())
-        df = pd.DataFrame(data)
-        
-        if df.empty:
-            print("La base de datos está vacía. No se puede realizar el EDA.")
+        total_rows = df.count()
+        if total_rows == 0:
+            print("No se encontraron registros en la coleccion de MongoDB.")
             return
-
-        # 2. Análisis de Nulos
-        print("Analizando valores nulos...")
-        null_percentage = (df.isnull().sum() / len(df)) * 100
-        
-        # Columnas con más del 50% de nulos
-        high_null_cols = null_percentage[null_percentage > 50]
-        print(f"Columnas con más del 50% de nulos:\n{high_null_cols}")
-
-        # 3. Imputación de valores específicos (ej. nkill)
-        if 'nkill' in df.columns:
-            df['nkill'] = df['nkill'].fillna(0)
-            print("Valores nulos en 'nkill' imputados a 0.")
-
-        # 4. Duplicados
-        if 'eventid' in df.columns:
-            duplicates = df.duplicated(subset=['eventid']).sum()
-            print(f"Registros duplicados encontrados por 'eventid': {duplicates}")
-
-        # 5. Visualización: Porcentaje de datos faltantes
-        print("Generando visualización de datos faltantes...")
-        plt.figure(figsize=(12, 8))
-        # Seleccionamos solo columnas con nulos para el gráfico si son muchas
-        missing_data = null_percentage[null_percentage > 0].sort_values(ascending=False)
-        
-        if not missing_data.empty:
-            sns.barplot(x=missing_data.values, y=missing_data.index, palette="viridis")
-            plt.title("Porcentaje de Datos Faltantes por Variable")
-            plt.xlabel("% de Nulos")
-            plt.ylabel("Variables")
             
-            # Guardamos el gráfico en lugar de mostrarlo (entorno Docker)
-            plt.tight_layout()
-            plt.savefig("missing_data.png")
-            print("Gráfico 'missing_data.png' guardado con éxito.")
-        else:
-            print("No se encontraron valores nulos para visualizar.")
+        print(f"Registros cargados exitosamente: {total_rows}")
 
-        client.close()
+        # 4. Analisis de Nulos (Calidad del Dato)
+        print("Analizando calidad del dato (nulos)...")
+        # Calculamos nulos por columna
+        null_counts = df.select([count(when(col(c).isNull(), c)).alias(c) for c in df.columns]).collect()[0].asDict()
+        null_percentages = {k: (v / total_rows) * 100 for k, v in null_counts.items()}
+
+        # Identificar columnas con > 50% nulos
+        high_null_cols = {k: v for k, v in null_percentages.items() if v > 50}
+        print(f"Variables con >50% de nulos detectadas: {len(high_null_cols)}")
+        for col_name, perc in high_null_cols.items():
+            print(f"   - {col_name}: {perc:.2f}%")
+
+        # 5. Imputacion (ej. nkill)
+        if "nkill" in df.columns:
+            df = df.fillna({"nkill": 0})
+            print("Imputacion completada: nulos en 'nkill' reemplazados por 0.")
+
+        # 6. Duplicados
+        if "eventid" in df.columns:
+            distinct_count = df.select("eventid").distinct().count()
+            duplicates = total_rows - distinct_count
+            print(f"Analisis de duplicados en 'eventid': {duplicates} encontrados.")
+
+        # 7. Visualizacion: % de datos faltantes
+        print("Generando visualizacion de calidad del dato...")
+        missing_df = pd.DataFrame(list(null_percentages.items()), columns=['Variable', 'Percentage'])
+        missing_df = missing_df[missing_df['Percentage'] > 0].sort_values(by='Percentage', ascending=False)
+
+        if not missing_df.empty:
+            plt.figure(figsize=(12, 12))
+            sns.barplot(data=missing_df.head(40), x='Percentage', y='Variable', palette='flare')
+            plt.title("Calidad del Dato: % de Nulos por Variable (MongoDB Source)")
+            plt.xlabel("% de Faltantes")
+            plt.tight_layout()
+            plt.savefig("missing_data_mongo.png")
+            print("Visualizacion guardada como 'missing_data_mongo.png'.")
 
     except Exception as e:
-        print(f"Error durante el proceso EDA: {e}")
-
-if __name__ == "__main__":
-    perform_eda()
+        print(f"Error durante el analisis EDA con Spark: {e}")
+    finally:
+        print("Cerrando sesion de Spark...")
+        spark.stop()
