@@ -2,7 +2,7 @@ import os
 import csv
 import json
 import requests
-from pymongo import MongoClient, UpdateOne
+from pymongo import MongoClient
 
 def upload_data():
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
@@ -48,35 +48,31 @@ def upload_data():
         client = MongoClient(MONGO_URI)
         db = client[DATABASE_NAME]
         collection = db[COLLECTION_NAME]
+        
+        print(f"Borrando coleccion existente...")
+        collection.drop()
+        
         print(f"Conectado a MongoDB.")
 
-        print(f"Sincronizando registros (Insertar solo si no existe)...")
+        print(f"Subiendo registros...")
         with open(csv_file, 'r', encoding='latin-1') as f_csv:
             reader = csv.DictReader(f_csv)
-            operations = []
+            batch = []
             count = 0
             for row in reader:
-                event_id = row.get("eventid")
-                if event_id:
-                    operations.append(
-                        UpdateOne(
-                            {"eventid": event_id},
-                            {"$setOnInsert": row},
-                            upsert=True
-                        )
-                    )
+                batch.append(row)
                 count += 1
-                if len(operations) >= 2000:
-                    collection.bulk_write(operations)
-                    print(f"   - {count} registros procesados...")
-                    operations = []
-            if operations:
-                collection.bulk_write(operations)
+                if len(batch) >= 5000:
+                    collection.insert_many(batch)
+                    print(f"   - {count} registros subidos...")
+                    batch = []
+            if batch:
+                collection.insert_many(batch)
             
-        print(f"Sincronizacion completada.")
+        print(f"Carga completada.")
 
     except Exception as e:
-        print(f"Error al sincronizar con MongoDB: {e}")
+        print(f"Error al subir a MongoDB: {e}")
     finally:
         if client:
             client.close()
