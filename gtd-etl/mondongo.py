@@ -26,16 +26,18 @@ def upload_data():
         print(f"Error descargando el CSV: {e}")
         return
 
-    data = []
-    print(f"Transformando CSV a JSON...")
+    print(f"Transformando CSV a JSON (Streaming)...")
     try:
-        with open(csv_file, encoding='latin-1') as f:
-            reader = csv.DictReader(f)
+        with open(csv_file, 'r', encoding='latin-1') as f_in, open(json_file, 'w', encoding='utf-8') as f_out:
+            reader = csv.DictReader(f_in)
+            f_out.write("[\n")
+            first = True
             for row in reader:
-                data.append(row)
-
-        with open(json_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
+                if not first:
+                    f_out.write(",\n")
+                json.dump(row, f_out, indent=4)
+                first = False
+            f_out.write("\n]")
         print(f"Archivo JSON creado correctamente.")
     except Exception as e:
         print(f"Error en la transformacion: {e}")
@@ -48,8 +50,25 @@ def upload_data():
         collection = db[COLLECTION_NAME]
         print(f"Conectado a MongoDB.")
 
-        print(f"Subiendo datos desde el JSON...")
-        collection.insert_many(data)
+        print(f"Subiendo datos por bloques...")
+        with open(json_file, 'r', encoding='utf-8') as f:
+            # En lugar de cargar todo el JSON, volvemos a leer el CSV para subirlo
+            # porque leer un JSON gigante por bloques es muy costoso.
+            # Volver a leer el CSV es instantáneo y ahorra RAM.
+            with open(csv_file, 'r', encoding='latin-1') as f_csv:
+                reader = csv.DictReader(f_csv)
+                batch = []
+                count = 0
+                for row in reader:
+                    batch.append(row)
+                    count += 1
+                    if len(batch) >= 5000:
+                        collection.insert_many(batch)
+                        print(f"   - {count} registros subidos...")
+                        batch = []
+                if batch:
+                    collection.insert_many(batch)
+            
         print(f"Datos subidos correctamente.")
 
     except Exception as e:
