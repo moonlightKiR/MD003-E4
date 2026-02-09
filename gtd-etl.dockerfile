@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     build-base \
     libffi-dev \
     openssl-dev \
-    git
+    git \
+    sed
 
 RUN mkdir /tmp/repo && \
     cd /tmp/repo && \
@@ -17,6 +18,8 @@ RUN mkdir /tmp/repo && \
     git pull origin main && \
     mv gtd-etl/* /gtd-etl/ && \
     cd /gtd-etl && \
-    rm -rf /tmp/repo
+    rm -rf /tmp/repo && \
+    sed -i '/json/d' requirements.txt && \
+    echo "requests" >> requirements.txt
 
 RUN pip install --no-cache-dir -r requirements.txt
