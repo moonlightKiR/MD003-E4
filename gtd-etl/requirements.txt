@@ -1,4 +1,7 @@
 pymongo
 requests
 polars
+pandas
+matplotlib
+seaborn
 fpdf2

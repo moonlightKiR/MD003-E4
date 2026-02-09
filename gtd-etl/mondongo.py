@@ -83,3 +83,14 @@ def upload_data():
         if os.path.exists(json_file):
              os.remove(json_file)
         print(f"Archivos temporales eliminados.")
+
+def get_collection():
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    DATABASE_NAME = os.getenv("DATABASE_NAME", "gtd_database")
+    COLLECTION_NAME = "incidents"
+    
+    client = MongoClient(MONGO_URI)
+    db = client[DATABASE_NAME]
+    collection = db[COLLECTION_NAME]
+    
+    return collection
