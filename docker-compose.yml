@@ -19,6 +19,7 @@ services:
       MONGO_URI: mongodb://mongo:27017/
       DATABASE_NAME: gtd_database
       COLLECTION_NAME: incidents
+      PYTHONDONTWRITEBYTECODE: 1
     command: [ "python", "main.py" ]
     volumes:
       - ./gtd-etl:/gtd-etl
