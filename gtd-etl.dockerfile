@@ -18,8 +18,6 @@ RUN mkdir /tmp/repo && \
     git pull origin main && \
     mv gtd-etl/* /gtd-etl/ && \
     cd /gtd-etl && \
-    rm -rf /tmp/repo && \
-    sed -i '/json/d' requirements.txt && \
-    echo "requests" >> requirements.txt
+    rm -rf /tmp/repo
 
 RUN pip install --no-cache-dir -r requirements.txt

@@ -14,7 +14,6 @@ def upload_data():
     base_path = os.path.dirname(os.path.abspath(__file__))
     csv_file = os.path.join(base_path, "global_terrorism_data.csv")
 
-    # 1. Descargar el CSV desde el link
     print(f"Descargando CSV desde: {CSV_URL}...")
     try:
         response = requests.get(CSV_URL, stream=True)
@@ -27,21 +26,20 @@ def upload_data():
         print(f"❌ Error descargando el CSV: {e}")
         return
 
-    # 2. Leer el CSV y convertir cada fila en un diccionario (transformación a JSON)
     data = []
     print(f"Transformando CSV a JSON (diccionarios)...")
     try:
-        # Usamos latin-1 como pediste
+
         with open(csv_file, encoding='latin-1') as f:
             reader = csv.DictReader(f)
             for row in reader:
                 data.append(row)
-        print(f"✅ Transformación completada. Registros procesados: {len(data)}")
+        print(f"Transformación completada. Registros procesados: {len(data)}")
     except Exception as e:
-        print(f"❌ Error procesando el CSV: {e}")
+        print(f"Error procesando el CSV: {e}")
         return
 
-    # 3. Subir a MongoDB
+
     client = None
     try:
         client = MongoClient(MONGO_URI)
@@ -51,7 +49,6 @@ def upload_data():
 
         print(f"Subiendo {len(data)} registros a la colección '{COLLECTION_NAME}'...")
         if data:
-            # Insertar en bloques para evitar problemas de tamaño de mensaje en MongoDB
             batch_size = 5000
             for i in range(0, len(data), batch_size):
                 batch = data[i : i + batch_size]
@@ -63,13 +60,12 @@ def upload_data():
             print("No hay datos para insertar.")
 
     except Exception as e:
-        print(f"❌ Error al subir a MongoDB: {e}")
+        print(f"Error al subir a MongoDB: {e}")
     finally:
         if client:
             client.close()
             print("Conexión con MongoDB cerrada.")
         
-        # Opcional: limpiar el csv si ya no se necesita
         if os.path.exists(csv_file):
              os.remove(csv_file)
              print(f"Archivo temporal {csv_file} eliminado.")
