@@ -4,12 +4,12 @@ import json
 import requests
 from pymongo import MongoClient
 
+MONGO_URI = "mongodb://mongo:27017/"
+DATABASE_NAME = "gtd_database"
+COLLECTION_NAME = "incidents"
+CSV_URL = "https://media.githubusercontent.com/media/moonlightKiR/GTD/refs/heads/main/global_terrorism_data.csv"
+
 def upload_data():
-    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-    DATABASE_NAME = os.getenv("DATABASE_NAME", "gtd_database")
-    COLLECTION_NAME = "incidents"
-    CSV_URL = "https://media.githubusercontent.com/media/moonlightKiR/GTD/refs/heads/main/global_terrorism_data.csv"
-    
     base_path = os.path.dirname(os.path.abspath(__file__))
     csv_file = os.path.join(base_path, "global_terrorism_data.csv")
     json_file = os.path.join(base_path, "global_terrorism_data.json")
@@ -82,9 +82,6 @@ def upload_data():
         print(f"Archivos temporales eliminados.")
 
 def get_collection():
-    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-    DATABASE_NAME = os.getenv("DATABASE_NAME", "gtd_database")
-    COLLECTION_NAME = "incidents"
     client = MongoClient(MONGO_URI)
     db = client[DATABASE_NAME]
     return db[COLLECTION_NAME]

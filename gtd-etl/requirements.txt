@@ -4,6 +4,5 @@ polars
 pandas
 matplotlib
 seaborn
-pyspark
 h2o
 fpdf2

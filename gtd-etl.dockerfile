@@ -2,13 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /gtd-etl
 
-# Instalamos dependencias del sistema incluyendo JAVA para PySpark
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libffi-dev \
     libssl-dev \
     git \
-    default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir /tmp/repo && \
