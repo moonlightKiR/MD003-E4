@@ -2,12 +2,11 @@ import polars as pl
 import matplotlib.pyplot as plt
 import seaborn as sns
 import mondongo
-import os
 
 def perform_eda():
     try:
         # 1. Obtener la coleccion de MongoDB
-        client = mondongo.MongoClient("mongodb://mongo:27017/")
+        client = mondongo.MongoClient("mongodb://localhost:27017/")
         collection = client["gtd_database"]["incidents"]
         
         print("Cargando datos desde MongoDB con Polars (la opcion mas eficiente)...")
@@ -81,6 +80,3 @@ def perform_eda():
 
     except Exception as e:
         print(f"Error en el proceso EDA: {e}")
-
-if __name__ == "__main__":
-    perform_eda()

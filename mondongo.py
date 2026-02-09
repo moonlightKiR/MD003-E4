@@ -4,7 +4,7 @@ import json
 import requests
 from pymongo import MongoClient
 
-MONGO_URI = "mongodb://mongo:27017/"
+MONGO_URI = "mongodb://localhost:27017/"
 DATABASE_NAME = "gtd_database"
 COLLECTION_NAME = "incidents"
 CSV_URL = "https://media.githubusercontent.com/media/moonlightKiR/GTD/refs/heads/main/global_terrorism_data.csv"
