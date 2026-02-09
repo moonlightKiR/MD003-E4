@@ -1,3 +1,4 @@
 pymongo
 requests
 polars
+fpdf2

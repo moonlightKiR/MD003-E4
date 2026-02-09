@@ -1,12 +1,11 @@
-import json
 import os
 import csv
 import requests
-from pymongo import MongoClient, UpdateOne
+from pymongo import MongoClient
 
 def upload_data():
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-    DATABASE_NAME = "gtd_database"
+    DATABASE_NAME = os.getenv("DATABASE_NAME", "gtd_database")
     COLLECTION_NAME = "incidents"
     CSV_URL = "https://media.githubusercontent.com/media/moonlightKiR/GTD/refs/heads/main/global_terrorism_data.csv"
     
@@ -20,21 +19,9 @@ def upload_data():
         with open(csv_file, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print(f"CSV descargado.")
+        print(f"CSV descargado correctamente.")
     except Exception as e:
-        print(f"Error descargando: {e}")
-        return
-
-    data = []
-    print(f"Transformando CSV...")
-    try:
-        with open(csv_file, encoding='latin-1') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                data.append(row)
-        print(f"Transformación completada. Registros: {len(data)}")
-    except Exception as e:
-        print(f"Error procesando CSV: {e}")
+        print(f"Error descargando el CSV: {e}")
         return
 
     client = None
@@ -44,35 +31,34 @@ def upload_data():
         collection = db[COLLECTION_NAME]
         print(f"Conectado a MongoDB.")
 
-        print(f"Iniciando subida inteligente de {len(data)} registros...")
+        print(f"Procesando y subiendo registros...")
         
-        batch_size = 2000
-        for i in range(0, len(data), batch_size):
-            batch = data[i : i + batch_size]
-            operations = []
+        with open(csv_file, encoding='latin-1') as f:
+            reader = csv.DictReader(f)
+            batch = []
+            count = 0
             
-            for record in batch:
-                event_id = record.get("eventid")
-                if event_id:
-                    operations.append(
-                        UpdateOne(
-                            {"eventid": event_id}, 
-                            {"$set": record}, 
-                            upsert=True
-                        )
-                    )
+            for row in reader:
+                batch.append(row)
+                count += 1
+                
+                if len(batch) >= 5000:
+                    collection.insert_many(batch)
+                    print(f"   - {count} registros subidos...")
+                    batch = []
             
-            if operations:
-                collection.bulk_write(operations)
-
-        print(f"Datos sincronizados correctamente.")
+            if batch:
+                collection.insert_many(batch)
+                print(f"   - {count} registros totales subidos.")
+            
+            print(f"Datos subidos correctamente.")
 
     except Exception as e:
-        print(f"Error al sincronizar con MongoDB: {e}")
+        print(f"Error al subir a MongoDB: {e}")
     finally:
         if client:
             client.close()
-            print("Conexion cerrada.")
+            print("Conexion con MongoDB cerrada.")
         
         if os.path.exists(csv_file):
              os.remove(csv_file)
