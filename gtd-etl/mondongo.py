@@ -1,4 +1,3 @@
-import json
 import os
 import csv
 import requests
@@ -20,51 +19,47 @@ def upload_data():
         with open(csv_file, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print(f"CSV descargado correctamente en {csv_file}")
+        print(f"CSV descargado correctamente.")
     except Exception as e:
         print(f"Error descargando el CSV: {e}")
         return
-
-    data = []
-    print(f"Transformando CSV a JSON (diccionarios)...")
-    try:
-
-        with open(csv_file, encoding='latin-1') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                data.append(row)
-        print(f"Transformación completada. Registros procesados: {len(data)}")
-    except Exception as e:
-        print(f"Error procesando el CSV: {e}")
-        return
-
 
     client = None
     try:
         client = MongoClient(MONGO_URI)
         db = client[DATABASE_NAME]
         collection = db[COLLECTION_NAME]
-        print(f"Conectado a MongoDB en {MONGO_URI}")
+        print(f"Conectado a MongoDB.")
 
-        print(f"Subiendo {len(data)} registros a la colección '{COLLECTION_NAME}'...")
-        if data:
-            batch_size = 5000
-            for i in range(0, len(data), batch_size):
-                batch = data[i : i + batch_size]
-                collection.insert_many(batch)
-                print(f"   - {min(i + batch_size, len(data))}/{len(data)} insertados...")
+        print(f"Procesando y subiendo registros...")
+        
+        with open(csv_file, encoding='latin-1') as f:
+            reader = csv.DictReader(f)
+            batch = []
+            count = 0
             
-            print(f"🚀 ¡Todo listo! Datos subidos correctamente.")
-        else:
-            print("No hay datos para insertar.")
+            for row in reader:
+                batch.append(row)
+                count += 1
+                
+                if len(batch) >= 5000:
+                    collection.insert_many(batch)
+                    print(f"   - {count} registros subidos...")
+                    batch = []
+            
+            if batch:
+                collection.insert_many(batch)
+                print(f"   - {count} registros totales subidos.")
+            
+            print(f"Datos subidos correctamente.")
 
     except Exception as e:
         print(f"Error al subir a MongoDB: {e}")
     finally:
         if client:
             client.close()
-            print("Conexión con MongoDB cerrada.")
+            print("Conexion con MongoDB cerrada.")
         
         if os.path.exists(csv_file):
              os.remove(csv_file)
-             print(f"Archivo temporal {csv_file} eliminado.")
+             print(f"Archivo temporal eliminado.")
