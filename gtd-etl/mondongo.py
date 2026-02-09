@@ -2,7 +2,7 @@ import os
 import csv
 import json
 import requests
-from pymongo import MongoClient
+from pymongo import MongoClient, UpdateOne
 
 def upload_data():
     MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
@@ -50,29 +50,33 @@ def upload_data():
         collection = db[COLLECTION_NAME]
         print(f"Conectado a MongoDB.")
 
-        print(f"Subiendo datos por bloques...")
-        with open(json_file, 'r', encoding='utf-8') as f:
-            # En lugar de cargar todo el JSON, volvemos a leer el CSV para subirlo
-            # porque leer un JSON gigante por bloques es muy costoso.
-            # Volver a leer el CSV es instantáneo y ahorra RAM.
-            with open(csv_file, 'r', encoding='latin-1') as f_csv:
-                reader = csv.DictReader(f_csv)
-                batch = []
-                count = 0
-                for row in reader:
-                    batch.append(row)
-                    count += 1
-                    if len(batch) >= 5000:
-                        collection.insert_many(batch)
-                        print(f"   - {count} registros subidos...")
-                        batch = []
-                if batch:
-                    collection.insert_many(batch)
+        print(f"Sincronizando registros (Insertar solo si no existe)...")
+        with open(csv_file, 'r', encoding='latin-1') as f_csv:
+            reader = csv.DictReader(f_csv)
+            operations = []
+            count = 0
+            for row in reader:
+                event_id = row.get("eventid")
+                if event_id:
+                    operations.append(
+                        UpdateOne(
+                            {"eventid": event_id},
+                            {"$setOnInsert": row},
+                            upsert=True
+                        )
+                    )
+                count += 1
+                if len(operations) >= 2000:
+                    collection.bulk_write(operations)
+                    print(f"   - {count} registros procesados...")
+                    operations = []
+            if operations:
+                collection.bulk_write(operations)
             
-        print(f"Datos subidos correctamente.")
+        print(f"Sincronizacion completada.")
 
     except Exception as e:
-        print(f"Error al subir a MongoDB: {e}")
+        print(f"Error al sincronizar con MongoDB: {e}")
     finally:
         if client:
             client.close()
