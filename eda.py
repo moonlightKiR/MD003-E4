@@ -245,3 +245,44 @@ def decode_categorical_columns(df, mappings):
             )
     return df
 
+def run_lazy_pipeline(df):
+    """
+    Ejemplo de como usar Lazy en Polars para optimizar el proceso.
+    Combina la seleccion de variables y el casteo en un solo plan de ejecucion.
+    """
+    print("Iniciando Pipeline Lazy (Optimización de Polars)...")
+    
+    # 1. Iniciamos el modo Lazy con .lazy()
+    lf = df.lazy()
+    
+    # 2. Definimos las columnas del modelo estrella
+    star_columns = [
+        "nkill", "nwound", "success", "propvalue", "iyear", "imonth", "iday", 
+        "country_txt", "region_txt", "provstate", "city", "latitude", "longitude", 
+        "gname", "gsubname", "attacktype1_txt", "suicide", "targtype1_txt", 
+        "corp1", "target1", "weaptype1_txt", "weapsubtype1_txt"
+    ]
+    available = [c for c in star_columns if c in df.columns]
+
+    # 3. Encadenamos operaciones (todavia no se ejecutan)
+    lf = (
+        lf.select(available)
+        .with_columns([
+            pl.col(c).cast(pl.Float64, strict=False).fill_null(0).cast(pl.Int64) 
+            for c in ["nkill", "nwound", "iyear", "imonth", "iday", "success"] 
+            if c in available
+        ])
+        .with_columns([
+            pl.col(c).cast(pl.Float64, strict=False).fill_null(0.0)
+            for c in ["latitude", "longitude", "propvalue"]
+            if c in available
+        ])
+    )
+    
+    # 4. En este punto Polars ya sabe que columnas no usas y optimiza el plan.
+    # Con .collect() ejecutamos todo de golpe de la forma mas rapida posible.
+    print("Ejecutando plan optimizado con .collect()...")
+    df_final = lf.collect()
+    
+    print(f"Procesamiento Lazy finalizado: {df_final.width} columnas.")
+    return df_final
