@@ -24,14 +24,91 @@ def get_dataframe():
         df = pl.from_dicts(documents)
         print(f"DataFrame creado con exito: {df.height} filas y {df.width} columnas.")
         return df
-
     except Exception as e:
         print(f"Error al obtener el DataFrame: {e}")
         return None
 
+def select_star_schema_variables(df):
+    """
+    Selecciona las variables necesarias para construir el modelo de estrella
+    según la tabla de Hechos y las Dimensiones especificadas.
+    """
+    print("Seleccionando variables para el modelo")
+    
+    # Lista de columnas requeridas basada en tu especificación
+    required_columns = [
+        # 1. ATAQUE (Hechos)
+        "eventid", # Usaremos eventid como ID_ataque
+        "nkill", 
+        "nwound", 
+        "success", 
+        "propvalue",
+        
+        # 2. TIEMPO
+        "iyear", 
+        "imonth", 
+        "iday",
+        
+        # 3. UBICACION
+        "country_txt", 
+        "region_txt", 
+        "provstate", 
+        "city", 
+        "latitude", 
+        "longitude",
+        
+        # 4. GRUPO
+        "gname", 
+        "gsubname", 
+        
+        # 5. METODO
+        "attacktype1_txt", 
+        "suicide",
+        
+        # 6. OBJETIVO
+        "targtype1_txt", 
+        "corp1", 
+        "target1",
+        
+        # 7. ARMA
+        "weaptype1_txt", 
+        "weapsubtype1_txt"
+    ]
+    
+    # Verificamos qué columnas existen realmente en el DF para evitar errores
+    available_columns = [col for col in required_columns if col in df.columns]
+    
+    if len(available_columns) < len(required_columns):
+        missing = set(required_columns) - set(available_columns)
+        print(f"Aviso: Faltan algunas columnas en el dataset: {missing}")
+    
+    # Realizamos el select con Polars
+    df_star = df.select(available_columns)
+    
+    print(f"Modelo de estrella filtrado: {df_star.width} columnas seleccionadas.")
+    return df_star
+
+def save_quality_chart(report_df, title="Top 10 Variables con mas Nulos/Vacios"):
+    if report_df is None or report_df.is_empty():
+        return
+        
+    print(f"Generando grafico...")
+    plt.style.use('ggplot')
+    plt.figure(figsize=(10, 6))
+    
+    # Tomamos el Top 10
+    plot_data = report_df.head(10).to_pandas()
+    sns.barplot(data=plot_data, x="Percentage", y="Variable")
+    
+    plt.title(title, fontsize=14, pad=15)
+    plt.xlabel("% de Faltantes (Nulos + Vacios)")
+    plt.ylabel("Variables")
+    plt.tight_layout()
+    plt.show()
+
 def analyze_data_quality(df):
-    """Calcula el porcentaje de nulos y vacios por columna."""
-    print("Analizando calidad del dato...")
+    """Calcula, reporta y visualiza el numero exacto de nulos y vacios por columna."""
+    print("Analizando calidad del dato (Nulos y Vacios)...")
     total_rows = df.height
     missing_stats = []
     
@@ -44,49 +121,38 @@ def analyze_data_quality(df):
         
         total_missing = n_null + n_empty
         if total_missing > 0:
+            percentage = (total_missing / total_rows) * 100
             missing_stats.append({
                 "Variable": col_name,
-                "Percentage": (total_missing / total_rows) * 100
+                "Nulos": n_null,
+                "Vacios": n_empty,
+                "Total_Missing": total_missing,
+                "Percentage": percentage
             })
     
     if not missing_stats:
-        print("No se han detectado valores nulos ni vacios.")
-        return None
+        print("Excelente: No se han detectado valores nulos ni vacios.")
+        return []
     
-    report_df = pl.DataFrame({
-        "Variable": [item["Variable"] for item in missing_stats],
-        "Percentage": [item["Percentage"] for item in missing_stats]
-    }).sort("Percentage", descending=True)
+    report_df = pl.DataFrame(missing_stats).sort("Total_Missing", descending=True)
     
-    return report_df
+    print(f"\nSe han detectado {len(missing_stats)} columnas con datos faltantes.")
+    print("Top 10 variables con mas nulos/vacios:")
+    top_10 = report_df.head(10)
+    for row in top_10.rows(named=True):
+        print(f" - {row['Variable']}: {row['Total_Missing']} faltantes ({row['Percentage']:.2f}%)")
+    print("")
 
-def save_quality_chart(report_df, filename="missing_data_report.png"):
-    """Genera y guarda un grafico de barras con el porcentaje de nulos."""
-    if report_df is None:
-        return
-        
-    print(f"Generando reporte grafico: {filename}...")
-    plt.style.use('ggplot')
-    plt.figure(figsize=(12, 10))
-    
-    # Tomamos el Top 40 para que sea legible
-    plot_data = report_df.head(40).to_pandas()
-    sns.barplot(data=plot_data, x="Percentage", y="Variable", palette="viridis")
-    
-    plt.title("Calidad del Dato: % de Valores Faltantes o Vacíos", fontsize=15, pad=20)
-    plt.xlabel("% de Faltantes/Vacíos")
-    plt.ylabel("Variables")
-    plt.tight_layout()
-    plt.savefig(filename, dpi=300)
-    print("Grafico guardado con exito.")
+    save_quality_chart(report_df)
+
+    return report_df["Variable"].to_list()
 
 def check_duplicates(df, key_col="eventid"):
     """Analiza duplicados basados en una columna clave."""
     if key_col in df.columns:
-        total_rows = df.height
         total_unique = df.select(key_col).unique().height
-        duplicates = total_rows - total_unique
-        print(f"Analisis de duplicados en '{key_col}': {duplicates} encontrados de {total_rows} registros.")
+        duplicates = df.height - total_unique
+        print(f"Analisis de duplicados en '{key_col}': {duplicates} encontrados.")
         return duplicates
     return 0
 
@@ -97,31 +163,5 @@ def clean_data(df):
         df = df.with_columns(
             pl.col("nkill").cast(pl.Float64, strict=False).fill_null(0.0)
         )
-        print("Imputacion en 'nkill' completada (rellenado con 0.0).")
+        print("Imputacion en 'nkill' completada.")
     return df
-
-def perform_full_eda():
-    """Ejecuta el flujo completo de EDA por partes."""
-    try:
-        # Parte 1: Carga
-        df = get_dataframe()
-        if df is None: return
-
-        # Parte 2: Calidad
-        report_df = analyze_data_quality(df)
-        
-        # Parte 3: Visualización
-        save_quality_chart(report_df)
-        
-        # Parte 4: Duplicados
-        check_duplicates(df)
-        
-        # Parte 5: Limpieza
-        df = clean_data(df)
-        
-        print("Proceso EDA completo finalizado.")
-        return df
-
-    except Exception as e:
-        print(f"Error en perform_full_eda: {e}")
-        return None
