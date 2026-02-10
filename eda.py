@@ -2,8 +2,6 @@ import polars as pl
 import matplotlib.pyplot as plt
 import seaborn as sns
 import mondongo
-import os
-import pandas as pd
 
 def get_dataframe():
     """Obtiene la coleccion de MongoDB y la convierte en un DataFrame de Polars."""
@@ -29,16 +27,12 @@ def get_dataframe():
         return None
 
 def select_star_schema_variables(df):
-    """
-    Selecciona las variables necesarias para construir el modelo de estrella
-    según la tabla de Hechos y las Dimensiones especificadas.
-    """
+    
     print("Seleccionando variables para el modelo")
     
     # Lista de columnas requeridas basada en tu especificación
     required_columns = [
         # 1. ATAQUE (Hechos)
-        "eventid", # Usaremos eventid como ID_ataque
         "nkill", 
         "nwound", 
         "success", 
@@ -75,14 +69,12 @@ def select_star_schema_variables(df):
         "weapsubtype1_txt"
     ]
     
-    # Verificamos qué columnas existen realmente en el DF para evitar errores
     available_columns = [col for col in required_columns if col in df.columns]
     
     if len(available_columns) < len(required_columns):
         missing = set(required_columns) - set(available_columns)
         print(f"Aviso: Faltan algunas columnas en el dataset: {missing}")
     
-    # Realizamos el select con Polars
     df_star = df.select(available_columns)
     
     print(f"Modelo de estrella filtrado: {df_star.width} columnas seleccionadas.")
@@ -96,7 +88,6 @@ def save_quality_chart(report_df, title="Top 10 Variables con mas Nulos/Vacios")
     plt.style.use('ggplot')
     plt.figure(figsize=(10, 6))
     
-    # Tomamos el Top 10
     plot_data = report_df.head(10).to_pandas()
     sns.barplot(data=plot_data, x="Percentage", y="Variable")
     
@@ -107,8 +98,9 @@ def save_quality_chart(report_df, title="Top 10 Variables con mas Nulos/Vacios")
     plt.show()
 
 def analyze_data_quality(df):
-    """Calcula, reporta y visualiza el numero exacto de nulos y vacios por columna."""
+
     print("Analizando calidad del dato (Nulos y Vacios)...")
+
     total_rows = df.height
     missing_stats = []
     
@@ -137,9 +129,9 @@ def analyze_data_quality(df):
     report_df = pl.DataFrame(missing_stats).sort("Total_Missing", descending=True)
     
     print(f"\nSe han detectado {len(missing_stats)} columnas con datos faltantes.")
-    print("Top 10 variables con mas nulos/vacios:")
-    top_10 = report_df.head(10)
-    for row in top_10.rows(named=True):
+    print("Top 100 variables con mas nulos/vacios:")
+    top_100 = report_df.head(100)
+    for row in top_100.rows(named=True):
         print(f" - {row['Variable']}: {row['Total_Missing']} faltantes ({row['Percentage']:.2f}%)")
     print("")
 
@@ -148,7 +140,9 @@ def analyze_data_quality(df):
     return report_df["Variable"].to_list()
 
 def check_duplicates(df, key_col="eventid"):
-    """Analiza duplicados basados en una columna clave."""
+    
+    print("Analizando duplicados...")
+    
     if key_col in df.columns:
         total_unique = df.select(key_col).unique().height
         duplicates = df.height - total_unique
@@ -156,12 +150,98 @@ def check_duplicates(df, key_col="eventid"):
         return duplicates
     return 0
 
-def clean_data(df):
-    """Realiza imputaciones y limpiezas basicas."""
-    print("Iniciando limpieza e imputacion...")
-    if "nkill" in df.columns:
-        df = df.with_columns(
-            pl.col("nkill").cast(pl.Float64, strict=False).fill_null(0.0)
-        )
-        print("Imputacion en 'nkill' completada.")
+def cast_numeric_columns(df):
+    print("Corrigiendo tipos de datos numéricos...")
+    
+    # Columnas para convertir a Entero
+    cols_int = ["nkill", "nwound", "propvalue", "iyear", "imonth", "iday", "success"]
+    for col in cols_int:
+        if col in df.columns:
+            df = df.with_columns(
+                pl.col(col)
+                .cast(pl.Float64, strict=False) 
+                .fill_null(0)
+                .cast(pl.Int64)
+            )
+            print(f" - Columna '{col}' convertida a Int64.")
+
+    # Columnas para convertir a Decimal (Float64)
+    cols_float = ["latitude", "longitude"]
+    for col in cols_float:
+        if col in df.columns:
+            df = df.with_columns(
+                pl.col(col)
+                .cast(pl.Float64, strict=False) 
+                .fill_null(0.0)
+            )
+            print(f" - Columna '{col}' convertida a Float64.")
+            
     return df
+
+def list_categorical_uniques(df):
+   
+    print("Buscando valores únicos en columnas de texto...")
+    
+    cat_cols = [col for col in df.columns if df[col].dtype in [pl.String]]
+    
+    if not cat_cols:
+        print("No se han encontrado columnas de tipo string.")
+        return {}
+
+    uniques_map = {}
+    for col in cat_cols:
+        unique_values = df[col].unique().to_list()
+        # Quitamos vacíos para limpiar el reporte
+        unique_values = [v for v in unique_values if v not in ["", None]]
+        uniques_map[col] = unique_values
+        
+        print(f"\nColumna String: '{col}'")
+        print(f"  Total únicos: {len(unique_values)}")
+        if len(unique_values) <= 20:
+            print(f"  Valores: {unique_values}")
+        else:
+            print(f"  Valores (Top 15): {unique_values[:15]}...")
+            
+    return uniques_map
+
+def encode_categorical_columns(df):
+    """
+    Identifica automáticamente las columnas de tipo texto y las convierte
+    a numérico conservando el mapeo.
+    Retorna (df_transformado, dict_mapeos).
+    """
+    # Identificamos columnas de tipo String/Utf8
+    cat_cols = [col for col in df.columns if df[col].dtype in [pl.String, pl.Utf8]]
+    
+    print(f"Codificando columnas detectadas como texto: {cat_cols}...")
+    mappings = {}
+    
+    for col in cat_cols:
+        # Obtenemos valores únicos y creamos diccionario {texto: numero}
+        unique_vals = df[col].unique().to_list()
+        # Filtramos None o vacíos para que el mapeo sea limpio
+        mapping = {val: i for i, val in enumerate(unique_vals) if val not in [None, ""]}
+        mappings[col] = mapping
+        
+        # Aplicamos el mapeo usando una expresión de Polars
+        df = df.with_columns(
+            pl.col(col).replace(mapping, default=None).cast(pl.Int64)
+        )
+        print(f" - '{col}' codificado ({len(unique_vals)} categorías).")
+            
+    return df, mappings
+
+def decode_categorical_columns(df, mappings):
+    """
+    Realiza el proceso inverso: de numérico a los textos originales usando los mapeos.
+    """
+    print("Decodificando columnas a texto original...")
+    for col, mapping in mappings.items():
+        if col in df.columns:
+            # Invertimos el diccionario: {numero: texto}
+            inverse_mapping = {v: k for k, v in mapping.items()}
+            df = df.with_columns(
+                pl.col(col).replace(inverse_mapping, default="Unknown").cast(pl.String)
+            )
+    return df
+
