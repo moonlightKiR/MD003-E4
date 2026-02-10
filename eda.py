@@ -248,7 +248,7 @@ def decode_categorical_columns(df, mappings):
 def run_lazy_pipeline(df):
     """
     Ejemplo de como usar Lazy en Polars para optimizar el proceso.
-    Combina la seleccion de variables y el casteo en un solo plan de ejecucion.
+    Combina la seleccion de variables, el casteo y el filtrado en un solo plan.
     """
     print("Iniciando Pipeline Lazy (Optimización de Polars)...")
     
@@ -257,6 +257,7 @@ def run_lazy_pipeline(df):
     
     # 2. Definimos las columnas del modelo estrella
     star_columns = [
+        "eventid", # Incluimos el ID para evitar ShapeErrors después
         "nkill", "nwound", "success", "propvalue", "iyear", "imonth", "iday", 
         "country_txt", "region_txt", "provstate", "city", "latitude", "longitude", 
         "gname", "gsubname", "attacktype1_txt", "suicide", "targtype1_txt", 
@@ -267,6 +268,7 @@ def run_lazy_pipeline(df):
     # 3. Encadenamos operaciones (todavia no se ejecutan)
     lf = (
         lf.select(available)
+        # Primero casteamos a numerico para tratar los ceros correctamente
         .with_columns([
             pl.col(c).cast(pl.Float64, strict=False).fill_null(0).cast(pl.Int64) 
             for c in ["nkill", "nwound", "iyear", "imonth", "iday", "success"] 
@@ -277,12 +279,15 @@ def run_lazy_pipeline(df):
             for c in ["latitude", "longitude", "propvalue"]
             if c in available
         ])
+        # FILTRO: Eliminamos los registros donde el mes o el día son desconocidos (valor 0)
+        .filter(
+            (pl.col("imonth") != 0) & (pl.col("iday") != 0)
+        )
     )
     
-    # 4. En este punto Polars ya sabe que columnas no usas y optimiza el plan.
-    # Con .collect() ejecutamos todo de golpe de la forma mas rapida posible.
+    # 4. Ejecutamos el plan
     print("Ejecutando plan optimizado con .collect()...")
     df_final = lf.collect()
     
-    print(f"Procesamiento Lazy finalizado: {df_final.width} columnas.")
+    print(f"Procesamiento Lazy finalizado: {df_final.height} registros válidos conservados.")
     return df_final
