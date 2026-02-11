@@ -1,7 +1,10 @@
+import mlxtend.preprocessing.shuffle
 import polars as pl
 import matplotlib.pyplot as plt
 import seaborn as sns
 import mondongo
+import numpy as np
+import pandas as pd
 
 def get_dataframe():
     """Obtiene la coleccion de MongoDB y la convierte en un DataFrame de Polars."""
@@ -32,6 +35,7 @@ def select_star_schema_variables(df):
     
     # Lista de columnas requeridas basada en tu especificación
     required_columns = [
+        "eventid",
         # 1. ATAQUE (Hechos)
         "nkill", 
         "nwound", 
@@ -246,18 +250,13 @@ def decode_categorical_columns(df, mappings):
     return df
 
 def run_lazy_pipeline(df):
-    """
-    Ejemplo de como usar Lazy en Polars para optimizar el proceso.
-    Combina la seleccion de variables, el casteo y el filtrado en un solo plan.
-    """
+    
     print("Iniciando Pipeline Lazy (Optimización de Polars)...")
     
-    # 1. Iniciamos el modo Lazy con .lazy()
     lf = df.lazy()
     
-    # 2. Definimos las columnas del modelo estrella
     star_columns = [
-        "eventid", # Incluimos el ID para evitar ShapeErrors después
+        "eventid", 
         "nkill", "nwound", "success", "propvalue", "iyear", "imonth", "iday", 
         "country_txt", "region_txt", "provstate", "city", "latitude", "longitude", 
         "gname", "gsubname", "attacktype1_txt", "suicide", "targtype1_txt", 
@@ -265,10 +264,8 @@ def run_lazy_pipeline(df):
     ]
     available = [c for c in star_columns if c in df.columns]
 
-    # 3. Encadenamos operaciones (todavia no se ejecutan)
     lf = (
         lf.select(available)
-        # Primero casteamos a numerico para tratar los ceros correctamente
         .with_columns([
             pl.col(c).cast(pl.Float64, strict=False).fill_null(0).cast(pl.Int64) 
             for c in ["nkill", "nwound", "iyear", "imonth", "iday", "success"] 
@@ -279,15 +276,243 @@ def run_lazy_pipeline(df):
             for c in ["latitude", "longitude", "propvalue"]
             if c in available
         ])
-        # FILTRO: Eliminamos los registros donde el mes o el día son desconocidos (valor 0)
         .filter(
             (pl.col("imonth") != 0) & (pl.col("iday") != 0)
         )
     )
     
-    # 4. Ejecutamos el plan
     print("Ejecutando plan optimizado con .collect()...")
     df_final = lf.collect()
     
     print(f"Procesamiento Lazy finalizado: {df_final.height} registros válidos conservados.")
     return df_final
+
+def show_specific_mapping(mappings, column_name):
+    """
+    Imprime de forma legible el mapeo almacenado para una columna específica.
+    Muestra qué número corresponde a qué texto original.
+    """
+    if column_name not in mappings:
+        print(f"La columna '{column_name}' no se encuentra en el diccionario de mapeos.")
+        return
+        
+    print(f"\n--- Mapeo para la columna: {column_name} ---")
+    mapping_dict = mappings[column_name]
+    
+    # Invertimos y ordenamos para mostrarlo del 0 al final
+    # mappings[col] es {texto: id}, queremos mostrarlo ordenado por id
+    sorted_mapping = sorted(mapping_dict.items(), key=lambda item: item[1])
+    
+    for text, idx in sorted_mapping:
+        print(f" ID {idx:2} -> {text}")
+    print("------------------------------------------\n")
+
+def plot_top_countries(df, top_n=15):
+    """Visualiza los países con mayor número de incidentes divididos por éxito/fallo."""
+    print(f"Graficando Top {top_n} países con estado de éxito...")
+    
+    # 1. Obtenemos los nombres de los top N países
+    top_country_names = df.group_by("country_txt").count().sort("count", descending=True).head(top_n).select("country_txt")
+    
+    # 2. Filtramos y agrupamos por país y éxito
+    country_counts = (
+        df.filter(pl.col("country_txt").is_in(top_country_names["country_txt"]))
+        .group_by(["country_txt", "success"])
+        .count()
+        .to_pandas()
+    )
+    
+    # Mapeo para la leyenda
+    country_counts["success"] = country_counts["success"].map({1: "Exitoso", 0: "Fallido"})
+    
+    plt.figure(figsize=(12, 8))
+    sns.set_style("whitegrid")
+    sns.barplot(
+        data=country_counts, 
+        x="count", 
+        y="country_txt", 
+        hue="success", 
+        order=top_country_names["country_txt"].to_list(), # Forzamos el orden correcto
+        palette={"Exitoso": "#2ecc71", "Fallido": "#e74c3c"}
+    )
+    
+    plt.title(f"Top {top_n} Países: Ataques Exitosos vs. Fallidos", fontsize=15, pad=20)
+    plt.xlabel("Cantidad de ataques", fontsize=12)
+    plt.ylabel("País", fontsize=12)
+    plt.legend(title="Resultado")
+    plt.tight_layout()
+    plt.show()
+
+def plot_attacks_by_weapon(df):
+    """Muestra la distribución de ataques según el tipo de arma, agrupando minoritarios (<5%) en 'Otros'."""
+    print("Graficando distribución por tipo de arma...")
+    
+    # 1. Agrupar y calcular porcentajes
+    weapon_counts = (
+        df.group_by("weaptype1_txt")
+        .count()
+        .sort("count", descending=True)
+    )
+    
+    total = weapon_counts["count"].sum()
+    weapon_counts = weapon_counts.with_columns(
+        (pl.col("count") / total * 100).alias("percentage")
+    ).to_pandas()
+    
+    # 2. Agrupar los menores de 5% en 'Otros'
+    mask = weapon_counts["percentage"] >= 5
+    others_count = weapon_counts.loc[~mask, "count"].sum()
+    
+    plot_data = weapon_counts[mask].copy()
+    if others_count > 0:
+        new_row = pd.DataFrame([{"weaptype1_txt": "Otros", "count": others_count, "percentage": (others_count/total*100)}])
+        plot_data = pd.concat([plot_data, new_row], ignore_index=True)
+    
+    # 3. Graficar
+    plt.figure(figsize=(10, 7))
+    colors = sns.color_palette("pastel", len(plot_data))
+    
+    plt.pie(plot_data["count"], 
+            labels=plot_data["weaptype1_txt"], 
+            autopct='%1.1f%%', 
+            startangle=140, 
+            colors=colors,
+            pctdistance=0.85,
+            explode=[0.05] * len(plot_data)) # Un pequeño espacio entre trozos
+    
+    # Círculo blanco central para convertirlo en Donut (opcional, queda más premium)
+    centre_circle = plt.Circle((0,0), 0.70, fc='white')
+    fig = plt.gcf()
+    fig.gca().add_artist(centre_circle)
+    
+    plt.title("Distribución de Armas Utilizadas (Categorías > 5%)", fontsize=15, pad=20)
+    plt.axis('equal') 
+    plt.tight_layout()
+    plt.show()
+
+def plot_historical_evolution(df):
+    """Muestra la tendencia de ataques a lo largo de los años dividida por éxito."""
+    print("Graficando evolución histórica por éxito...")
+    
+    yearly_trend = (
+        df.group_by(["iyear", "success"])
+        .count()
+        .sort("iyear")
+        .to_pandas()
+    )
+    
+    # Mapeo para leyenda
+    yearly_trend["success"] = yearly_trend["success"].map({1: "Exitoso", 0: "Fallido"})
+    
+    plt.figure(figsize=(14, 6))
+    sns.lineplot(data=yearly_trend, x="iyear", y="count", hue="success", palette={"Exitoso": "#2ecc71", "Fallido": "#e74c3c"}, linewidth=2)
+    
+    plt.title("Evolución de Ataques: Exitosos vs Fallidos por Año", fontsize=16, pad=20)
+    plt.xlabel("Año", fontsize=12)
+    plt.ylabel("Número de Ataques", fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.4)
+    plt.tight_layout()
+    plt.show()
+
+def plot_top_groups(df, top_n=10, exclude_unknown=True):
+    """Visualiza los grupos terroristas más activos divididos por éxito/fallo."""
+    print(f"Graficando Top {top_n} grupos con estado de éxito...")
+    
+    # 1. Filtramos y buscamos top grupos
+    groups_base = df
+    if exclude_unknown:
+        groups_base = groups_base.filter(pl.col("gname") != "Unknown")
+        
+    top_groups = groups_base.group_by("gname").count().sort("count", descending=True).head(top_n).select("gname")
+    
+    # 2. Agrupamos por grupo y éxito
+    plot_data = (
+        groups_base.filter(pl.col("gname").is_in(top_groups["gname"]))
+        .group_by(["gname", "success"])
+        .count()
+        .to_pandas()
+    )
+    
+    plot_data["success"] = plot_data["success"].map({1: "Exitoso", 0: "Fallido"})
+    
+    plt.figure(figsize=(12, 8))
+    sns.set_style("darkgrid")
+    sns.barplot(
+        data=plot_data, 
+        x="count", 
+        y="gname", 
+        hue="success", 
+        order=top_groups["gname"].to_list(), # Forzamos el orden correcto
+        palette={"Exitoso": "#27ae60", "Fallido": "#c0392b"}
+    )
+    
+    plt.title(f"Top {top_n} Grupos: Distribución de Éxito", fontsize=15, pad=20)
+    plt.xlabel("Número de Ataques", fontsize=12)
+    plt.ylabel("Nombre del Grupo", fontsize=12)
+    plt.legend(title="Resultado")
+    plt.tight_layout()
+    plt.show()
+
+def show_correlation_analysis(df, threshold=0.6):
+    """
+    Calcula la matriz de correlación, muestra un heatmap triangular
+    y lista las variables con una correlación mayor al umbral especificado.
+    """
+    print(f"Iniciando análisis de correlación (Umbral > {threshold})...")
+    
+    # Seleccionamos numéricas y quitamos IDs
+    exclude_list = ["eventid", "id_ataque", "id_tiempo", "id_ubicacion", "latitude", "longitude"]
+    numeric_cols = [
+        col for col in df.columns 
+        if df[col].dtype.is_numeric() and col not in exclude_list
+    ]
+    
+    if not numeric_cols:
+        print("No hay variables numéricas.")
+        return
+
+    # Calculamos correlación con Pandas
+    corr_matrix = df.select(numeric_cols).to_pandas().corr()
+    
+    # 1. Lista de correlaciones altas (evitando duplicados y la diagonal)
+    print(f"\n--- Variables con Correlación >= {threshold} ---")
+    high_corr_found = False
+    affected_vars = set()
+    
+    # Obtenemos el triángulo superior
+    sol = (corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+                  .stack()
+                  .sort_values(ascending=False))
+    
+    for (val1, val2), value in sol.items():
+        if abs(value) >= threshold:
+            print(f" * {val1} <-> {val2}: {value:.4f}")
+            affected_vars.add(val1)
+            affected_vars.add(val2)
+            high_corr_found = True
+            
+    if not high_corr_found:
+        print(f"No se han encontrado pares con correlación superior o igual a {threshold}.")
+    else:
+        print(f"\nLista de variables altamente correlacionadas: {list(affected_vars)}")
+
+    # 2. Mapa de Calor Triangular
+    plt.figure(figsize=(12, 10))
+    
+    # Creamos la mascara para el triangulo inferior (para mostrar el superior) o viceversa
+    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+    
+    sns.heatmap(corr_matrix, 
+                mask=mask, 
+                annot=True, 
+                fmt=".2f", 
+                cmap="coolwarm", 
+                center=0,
+                linewidths=.5)
+    
+    plt.title(f"Matriz de Correlación Triangular (Thresh: {threshold})", fontsize=15)
+    plt.tight_layout()
+    plt.show()
+
+    return corr_matrix
+

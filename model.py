@@ -1,7 +1,7 @@
 import h2o
 from h2o.frame import H2OFrame
 from h2o.estimators import H2ORandomForestEstimator, H2OGradientBoostingEstimator
-import matplotlib.pyplot as plt
+from h2o.estimators import H2OPrincipalComponentAnalysisEstimator
 
 CLASSIFICATION_VAR = "success"
 REGRESSION_VAR = "targtype1_txt"
